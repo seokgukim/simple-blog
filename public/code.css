@@ -1,0 +1,24 @@
+code {
+    font-family: monospace;
+    background: #f3f3f3;
+    padding: 0.1em 0.25em;
+}
+pre {
+    background: #f3f3f3;
+    padding: 0.75em;
+    overflow-x: auto;
+    line-height: 1.4;
+}
+pre code {
+    padding: 0;
+    background: transparent;
+}
+pre code .hl-keyword { color: #663399; font-weight: bold; }
+pre code .hl-string { color: #116329; }
+pre code .hl-comment { color: #57606a; font-style: italic; }
+pre code .hl-number { color: #0550ae; }
+math[display="block"] {
+    display: block;
+    margin: 1em 0;
+    overflow-x: auto;
+}
