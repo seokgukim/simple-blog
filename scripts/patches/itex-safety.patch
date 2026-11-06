@@ -1,0 +1,35 @@
+--- a/lex.yy.c
++++ b/lex.yy.c
+@@ -5493,12 +5493,14 @@
+ /* rule 741 can match eol */
+ YY_RULE_SETUP
+ #line 971 "itex2MML.l"
+-;
++/* simple-blog: never silently discard includegraphics. */
++{return UNKNOWNCHAR;}
+ 	YY_BREAK
+ case 742:
+ YY_RULE_SETUP
+ #line 973 "itex2MML.l"
+-{yylval=itex2MML_copy_string(yytext+1); return MOP;}
++/* simple-blog: unknown commands are errors, not implicit operator names. */
++{return UNKNOWNCHAR;}
+ 	YY_BREAK
+ case 743:
+ #line 976 "itex2MML.l"
+@@ -5523,7 +5525,14 @@
+ case 748:
+ YY_RULE_SETUP
+ #line 983 "itex2MML.l"
+-{return UNKNOWNCHAR;}
++/* simple-blog: raw Markdown inequalities need no XML entity preprocessing. */
++{
++    if (yytext[0] == '<' || yytext[0] == '>') {
++        yylval = itex2MML_copy_string(yytext[0] == '<' ? "&lt;" : "&gt;");
++        return MOL;
++    }
++    return UNKNOWNCHAR;
++}
+ 	YY_BREAK
+ 
+ case 749:

@@ -1,0 +1,226 @@
+--- a/md4c.h
++++ b/md4c.h
+@@ -280,6 +280,12 @@
+     MD_ALIGN align;
+ } MD_BLOCK_TD_DETAIL;
+ 
++/* simple-blog extension: exact delimiter-free source range for math spans. */
++typedef struct MD_SPAN_LATEXMATH_DETAIL {
++    MD_OFFSET begin;
++    MD_OFFSET end;
++} MD_SPAN_LATEXMATH_DETAIL;
++
+ /* Detailed info for MD_SPAN_A. */
+ typedef struct MD_SPAN_A_DETAIL {
+     MD_ATTRIBUTE href;
+--- a/md4c.c
++++ b/md4c.c
+@@ -3310,10 +3310,17 @@
+                 if(tmp - off <= 2) {
+                     unsigned flags = MD_MARK_POTENTIAL_OPENER | MD_MARK_POTENTIAL_CLOSER;
+ 
+-                    if(off > line->beg  &&  !ISUNICODEWHITESPACEBEFORE(off)  &&  !ISUNICODEPUNCTBEFORE(off))
+-                        flags &= ~MD_MARK_POTENTIAL_OPENER;
+-                    if(tmp < line->end  &&  !ISUNICODEWHITESPACE(tmp)  &&  !ISUNICODEPUNCT(tmp))
+-                        flags &= ~MD_MARK_POTENTIAL_CLOSER;
++                    /* simple-blog: math may touch Korean (or other) prose.
++                     * Inline delimiters flank non-space math internally, rather
++                     * than requiring whitespace outside the formula. A closer
++                     * before a digit is excluded to avoid pairing $5 and $10. */
++                    if(tmp - off == 1) {
++                        if(tmp >= line->end || ISUNICODEWHITESPACE(tmp))
++                            flags &= ~MD_MARK_POTENTIAL_OPENER;
++                        if(off <= line->beg || ISUNICODEWHITESPACEBEFORE(off) ||
++                           (tmp < line->end && ISDIGIT(tmp)))
++                            flags &= ~MD_MARK_POTENTIAL_CLOSER;
++                    }
+                     if(flags != 0)
+                         ADD_MARK(ch, off, tmp, flags);
+                 }
+@@ -4313,7 +4320,8 @@
+ 
+                 case '$':
+                     if(mark->flags & MD_MARK_OPENER) {
+-                        MD_ENTER_SPAN((mark->end - off) % 2 ? MD_SPAN_LATEXMATH : MD_SPAN_LATEXMATH_DISPLAY, NULL);
++                        MD_SPAN_LATEXMATH_DETAIL detail = { mark->end, ctx->marks[mark->next].beg };
++                        MD_ENTER_SPAN((mark->end - off) % 2 ? MD_SPAN_LATEXMATH : MD_SPAN_LATEXMATH_DISPLAY, &detail);
+                         text_type = MD_TEXT_LATEXMATH;
+                     } else {
+                         MD_LEAVE_SPAN((mark->end - off) % 2 ? MD_SPAN_LATEXMATH : MD_SPAN_LATEXMATH_DISPLAY, NULL);
+--- a/md4c-html.h
++++ b/md4c-html.h
+@@ -61,6 +61,13 @@
+             void* userdata, unsigned parser_flags, unsigned renderer_flags);
+ 
+ 
++/* simple-blog extension: application callbacks for math and whole code blocks. */
++int md_html_custom(const MD_CHAR* input, MD_SIZE input_size,
++                 void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
++                 void* userdata, unsigned parser_flags, unsigned renderer_flags,
++                 void (*math)(const MD_CHAR*, MD_SIZE, int, void*),
++                 void (*code)(const MD_CHAR*, MD_SIZE, const MD_CHAR*, MD_SIZE, void*));
++
+ #ifdef __cplusplus
+     }  /* extern "C" { */
+ #endif
+--- a/md4c-html.c
++++ b/md4c-html.c
+@@ -24,6 +24,7 @@
+  */
+ 
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ 
+ #include "md4c-html.h"
+@@ -54,6 +55,16 @@
+     unsigned flags;
+     int image_nesting_level;
+     char escape_map[256];
++    const MD_CHAR* input;
++    void (*math)(const MD_CHAR*, MD_SIZE, int, void*);
++    int in_math;
++    void (*code)(const MD_CHAR*, MD_SIZE, const MD_CHAR*, MD_SIZE, void*);
++    MD_CHAR *code_buffer;
++    MD_SIZE code_size;
++    size_t code_capacity;
++    int in_code;
++    MD_CHAR code_lang[32];
++    MD_SIZE code_lang_size;
+ };
+ 
+ #define NEED_HTML_ESC_FLAG   0x1
+@@ -385,7 +396,17 @@
+         case MD_BLOCK_LI:       render_open_li_block(r, (const MD_BLOCK_LI_DETAIL*)detail); break;
+         case MD_BLOCK_HR:       RENDER_VERBATIM(r, (r->flags & MD_HTML_FLAG_XHTML) ? "<hr />\n" : "<hr>\n"); break;
+         case MD_BLOCK_H:        RENDER_VERBATIM(r, head[((MD_BLOCK_H_DETAIL*)detail)->level - 1]); break;
+-        case MD_BLOCK_CODE:     render_open_code_block(r, (const MD_BLOCK_CODE_DETAIL*) detail); break;
++        case MD_BLOCK_CODE: {
++            const MD_BLOCK_CODE_DETAIL* det = (const MD_BLOCK_CODE_DETAIL*) detail;
++            render_open_code_block(r, det);
++            if(r->code != NULL) {
++                r->in_code = 1;
++                r->code_size = 0;
++                r->code_lang_size = det->lang.size < sizeof(r->code_lang) ? det->lang.size : 0;
++                if(r->code_lang_size) memcpy(r->code_lang, det->lang.text, r->code_lang_size);
++            }
++            break;
++        }
+         case MD_BLOCK_HTML:     /* noop */ break;
+         case MD_BLOCK_P:        RENDER_VERBATIM(r, "<p>"); break;
+         case MD_BLOCK_TABLE:    RENDER_VERBATIM(r, "<table>\n"); break;
+@@ -413,7 +434,12 @@
+         case MD_BLOCK_LI:       RENDER_VERBATIM(r, "</li>\n"); break;
+         case MD_BLOCK_HR:       /*noop*/ break;
+         case MD_BLOCK_H:        RENDER_VERBATIM(r, head[((MD_BLOCK_H_DETAIL*)detail)->level - 1]); break;
+-        case MD_BLOCK_CODE:     RENDER_VERBATIM(r, "</code></pre>\n"); break;
++        case MD_BLOCK_CODE:
++            if(r->code != NULL) {
++                r->code(r->code_buffer, r->code_size, r->code_lang, r->code_lang_size, r->userdata);
++                r->in_code = 0;
++            }
++            RENDER_VERBATIM(r, "</code></pre>\n"); break;
+         case MD_BLOCK_HTML:     /* noop */ break;
+         case MD_BLOCK_P:        RENDER_VERBATIM(r, "</p>\n"); break;
+         case MD_BLOCK_TABLE:    RENDER_VERBATIM(r, "</table>\n"); break;
+@@ -460,8 +486,17 @@
+         case MD_SPAN_IMG:               render_open_img_span(r, (MD_SPAN_IMG_DETAIL*) detail); break;
+         case MD_SPAN_CODE:              RENDER_VERBATIM(r, "<code>"); break;
+         case MD_SPAN_DEL:               RENDER_VERBATIM(r, "<del>"); break;
+-        case MD_SPAN_LATEXMATH:         RENDER_VERBATIM(r, "<x-equation>"); break;
+-        case MD_SPAN_LATEXMATH_DISPLAY: RENDER_VERBATIM(r, "<x-equation type=\"display\">"); break;
++        case MD_SPAN_LATEXMATH:
++        case MD_SPAN_LATEXMATH_DISPLAY:
++            if(r->math != NULL) {
++                const MD_SPAN_LATEXMATH_DETAIL* range = (const MD_SPAN_LATEXMATH_DETAIL*) detail;
++                r->math(r->input + range->begin, range->end - range->begin,
++                        type == MD_SPAN_LATEXMATH_DISPLAY, r->userdata);
++                r->in_math = 1;
++            } else {
++                RENDER_VERBATIM(r, type == MD_SPAN_LATEXMATH ? "<x-equation>" : "<x-equation type=\"display\">");
++            }
++            break;
+         case MD_SPAN_WIKILINK:          render_open_wikilink_span(r, (MD_SPAN_WIKILINK_DETAIL*) detail); break;
+     }
+ 
+@@ -487,7 +522,10 @@
+         case MD_SPAN_CODE:              RENDER_VERBATIM(r, "</code>"); break;
+         case MD_SPAN_DEL:               RENDER_VERBATIM(r, "</del>"); break;
+         case MD_SPAN_LATEXMATH:         /*fall through*/
+-        case MD_SPAN_LATEXMATH_DISPLAY: RENDER_VERBATIM(r, "</x-equation>"); break;
++        case MD_SPAN_LATEXMATH_DISPLAY:
++            if(r->math != NULL) r->in_math = 0;
++            else RENDER_VERBATIM(r, "</x-equation>");
++            break;
+         case MD_SPAN_WIKILINK:          RENDER_VERBATIM(r, "</x-wikilink>"); break;
+     }
+ 
+@@ -498,6 +536,22 @@
+ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata)
+ {
+     MD_HTML* r = (MD_HTML*) userdata;
++    if(r->in_math) return 0;
++    if(r->in_code) {
++        size_t need;
++        if(size > (MD_SIZE)-1 - r->code_size) return 1;
++        need = (size_t)r->code_size + size;
++        if(need > r->code_capacity) {
++            size_t capacity = need <= (size_t)-1 / 2 ? need * 2 : need;
++            MD_CHAR* buffer = (MD_CHAR*)realloc(r->code_buffer, capacity);
++            if(buffer == NULL) return 1;
++            r->code_buffer = buffer;
++            r->code_capacity = capacity;
++        }
++        if(size) memcpy(r->code_buffer + r->code_size, text, size);
++        r->code_size += size;
++        return 0;
++    }
+ 
+     switch(type) {
+         case MD_TEXT_NULLCHAR:  render_utf8_codepoint(r, 0x0000, render_verbatim); break;
+@@ -523,11 +577,19 @@
+ }
+ 
+ int
+-md_html(const MD_CHAR* input, MD_SIZE input_size,
++md_html_custom(const MD_CHAR* input, MD_SIZE input_size,
+         void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
+-        void* userdata, unsigned parser_flags, unsigned renderer_flags)
+-{
+-    MD_HTML render = { process_output, userdata, renderer_flags, 0, { 0 } };
++        void* userdata, unsigned parser_flags, unsigned renderer_flags,
++        void (*math)(const MD_CHAR*, MD_SIZE, int, void*),
++        void (*code)(const MD_CHAR*, MD_SIZE, const MD_CHAR*, MD_SIZE, void*))
++{
++    MD_HTML render = {0};
++    render.process_output = process_output;
++    render.userdata = userdata;
++    render.flags = renderer_flags;
++    render.input = input;
++    render.math = math;
++    render.code = code;
+     int i;
+ 
+     MD_PARSER parser = {
+@@ -562,6 +624,20 @@
+         }
+     }
+ 
+-    return md_parse(input, input_size, &parser, (void*) &render);
++    render.input = input;
++    {
++        int result = md_parse(input, input_size, &parser, (void*) &render);
++        free(render.code_buffer);
++        return result;
++    }
++}
++
++int
++md_html(const MD_CHAR* input, MD_SIZE input_size,
++        void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
++        void* userdata, unsigned parser_flags, unsigned renderer_flags)
++{
++    return md_html_custom(input, input_size, process_output, userdata,
++                          parser_flags, renderer_flags, NULL, NULL);
+ }
+ 
