@@ -199,6 +199,8 @@ static FILE *begin_page(const Site *site, const char *root, const char *rel, con
     escaped(f, title);
     fputs("\"><meta property=\"og:type\" content=\"website\"><meta property=\"og:image\" content=\"", f);
     for (const char *s = rel; *s; s++) if (*s == '/') fputs("../", f);
+    fputs("public/logo.svg\"><link rel=\"icon\" type=\"image/svg+xml\" href=\"", f);
+    for (const char *s = rel; *s; s++) if (*s == '/') fputs("../", f);
     fputs("public/logo.svg\"><link rel=\"stylesheet\" href=\"", f);
     for (const char *s = rel; *s; s++) if (*s == '/') fputs("../", f);
     fputs("public/code.css\"></head><body>\n<header>\n<h1 align=\"center\">", f);

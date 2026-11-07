@@ -18,10 +18,12 @@ class HTML(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.links = []
         self.active = []
+        self.elements = []
         self.feed(text)
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        self.elements.append((tag, attrs))
         if tag in ("style", "script") or any(
             k == "style" or k.lower().startswith("on") for k in attrs
         ):
@@ -152,6 +154,16 @@ class SiteTest(unittest.TestCase):
         self.assertLess(links.index("b.html"), links.index("z.html"))
         self.assertLess(links.index("z.html"), links.index("undated.html"))
         self.check_links()
+
+    def test_favicon_uses_logo_on_every_page(self):
+        self.put("nested/post.md", "Post body")
+        self.build()
+        for page in self.dest.rglob("*.html"):
+            parser = HTML(page.read_text())
+            icons = [attrs for tag, attrs in parser.elements if tag == "link" and attrs.get("rel") == "icon"]
+            self.assertEqual(len(icons), 1, str(page))
+            self.assertEqual(icons[0].get("type"), "image/svg+xml")
+            self.assertEqual((page.parent / icons[0]["href"]).resolve(), self.dest / "public/logo.svg")
 
     def test_embed_metadata_uses_page_title_and_logo(self):
         self.put("nested/post.md", '---\ntitle: "Post & title"\ntags: [Example]\n---\nPost body')
