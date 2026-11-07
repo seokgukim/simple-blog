@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include "render.h"
 #include "metadata.h"
@@ -191,7 +192,14 @@ static FILE *open_output(const char *root, const char *rel) {
 static FILE *begin_page(const Site *site, const char *root, const char *rel, const char *title) {
     FILE *f = open_output(root, rel);
     fputs("<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>", f);
-    escaped(f, title); fputs("</title><link rel=\"stylesheet\" href=\"", f);
+    escaped(f, title);
+    fputs("</title><meta property=\"og:site_name\" content=\"", f);
+    escaped(f, site->about.meta.title);
+    fputs("\"><meta property=\"og:title\" content=\"", f);
+    escaped(f, title);
+    fputs("\"><meta property=\"og:type\" content=\"website\"><meta property=\"og:image\" content=\"", f);
+    for (const char *s = rel; *s; s++) if (*s == '/') fputs("../", f);
+    fputs("public/logo.svg\"><link rel=\"stylesheet\" href=\"", f);
     for (const char *s = rel; *s; s++) if (*s == '/') fputs("../", f);
     fputs("public/code.css\"></head><body>\n<header>\n<h1 align=\"center\">", f);
     link(f, rel, "index.html", site->about.meta.title);
@@ -203,8 +211,17 @@ static FILE *begin_page(const Site *site, const char *root, const char *rel, con
     fputs("</p></nav>\n</header>\n<hr>\n<main>\n", f);
     return f;
 }
-static void end_page(FILE *f) {
-    fputs("</main>\n</body></html>\n", f);
+static void end_page(FILE *f, const Site *site) {
+    fputs("</main>\n", f);
+    if (site->about.meta.author) {
+        time_t now = time(NULL);
+        struct tm *local = localtime(&now);
+        if (!local) { fprintf(stderr, "cannot determine current year\n"); exit(1); }
+        fprintf(f, "<hr>\n<footer>© %d ", local->tm_year + 1900);
+        escaped(f, site->about.meta.author);
+        fputs("</footer>\n", f);
+    }
+    fputs("</body></html>\n", f);
     if (ferror(f) || fclose(f)) die("write HTML");
 }
 static void markdown(FILE *f, const Page *p) {
@@ -264,9 +281,9 @@ static void write_tags(const Site *site, const char *dest) {
         fputs("<h2>", f); escaped(f, tags[i]); fputs("</h2>\n<ul>\n", f);
         for (size_t j = 0; j < site->count; j++)
             if (has_tag(&site->posts[j], tags[i])) post_item(f, path, &site->posts[j]);
-        fputs("</ul>\n", f); end_page(f); free(path);
+        fputs("</ul>\n", f); end_page(f, site); free(path);
     }
-    fputs("</ul>\n", index); end_page(index); free(tags);
+    fputs("</ul>\n", index); end_page(index, site); free(tags);
 }
 static void write_site(const Site *site, const char *dest, const char *logo, size_t logo_size,
                        const char *css, size_t css_size) {
@@ -279,13 +296,13 @@ static void write_site(const Site *site, const char *dest, const char *logo, siz
     fputs("<p align=\"center\"><img src=\"public/logo.svg\" alt=\"Blog logo\"></p>\n<h2>Recent post</h2>\n", f);
     if (site->count) { fputs("<ul>\n", f); post_item(f, "index.html", &site->posts[0]); fputs("</ul>\n", f); }
     else fputs("<p>No posts yet.</p>\n", f);
-    end_page(f);
+    end_page(f, site);
     f = begin_page(site, dest, "about.html", site->about.meta.title);
-    markdown(f, &site->about); end_page(f);
+    markdown(f, &site->about); end_page(f, site);
     f = begin_page(site, dest, "posts.html", "Posts");
     fputs("<h2>Posts</h2>\n<ul>\n", f);
     for (size_t i = 0; i < site->count; i++) post_item(f, "posts.html", &site->posts[i]);
-    fputs("</ul>\n", f); end_page(f);
+    fputs("</ul>\n", f); end_page(f, site);
     write_tags(site, dest);
     for (size_t i = 0; i < site->count; i++) {
         const Page *p = &site->posts[i];
@@ -301,7 +318,7 @@ static void write_site(const Site *site, const char *dest, const char *logo, siz
             }
             fputs("</p>\n", f);
         }
-        markdown(f, p); fputs("</article>\n", f); end_page(f);
+        markdown(f, p); fputs("</article>\n", f); end_page(f, site);
     }
 }
 static void free_page(Page *p) {

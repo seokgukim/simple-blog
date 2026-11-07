@@ -1,6 +1,5 @@
 # simple-blog
 
-
 ![Live demo of the generated blog](app://c488f8875c9912648d187fff0a0c2d58c0cf/home/seokgukim/_projects/simple-blog/demo.gif?1794009153665)
 
 `simple-blog` is a simple blog builder written in C.
@@ -82,6 +81,7 @@ It does not style the surrounding page. Alignment still uses HTML's legacy `alig
 ---
 title: Seokgukim's Garage
 introduction: A little space for SeokguKim
+author: seokgukim
 ---
 
 # About me
@@ -89,6 +89,7 @@ introduction: A little space for SeokguKim
 Your about-page content goes here.
 ```
 
+- `author` is optional; when supplied, every page gets a copyright footer with the year at build time. Rebuild the site to update the year.
 - Posts may omit front matter: the relative filename is the fallback title, the date is absent, and tags are empty. Supplied metadata must be valid.
 - Dates must be calendar dates in `YYYY-MM-DD` format. Listings sort newest first, undated posts last, then by relative path to break ties. If all posts are undated, the first path is selected for the landing page.
 - YAML supports quoted strings, multiline text, UTF-8, and flow/block tag lists. Duplicate fields, invalid types, empty values, and invalid dates are errors. Unknown fields are ignored. Duplicate tags are removed.

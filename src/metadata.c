@@ -75,6 +75,7 @@ Metadata metadata_read(const char *text, size_t size, const char *path, int abou
             yaml_node_t *value = yaml_document_get_node(&doc, p->value);
             if (!strcmp(key, "title")) m.title = copy(scalar(value, path));
             else if (!strcmp(key, "introduction")) m.introduction = copy(scalar(value, path));
+            else if (!strcmp(key, "author")) m.author = copy(scalar(value, path));
             else if (!strcmp(key, "date")) {
                 m.date = copy(scalar(value, path));
                 if (!valid_date(m.date)) invalid(path, "date must be a valid YYYY-MM-DD calendar date");
@@ -103,7 +104,7 @@ Metadata metadata_read(const char *text, size_t size, const char *path, int abou
     return m;
 }
 void metadata_free(Metadata *m) {
-    free(m->title); free(m->introduction); free(m->date);
+    free(m->title); free(m->introduction); free(m->author); free(m->date);
     for (size_t i = 0; i < m->tag_count; i++) free(m->tags[i]);
     free(m->tags);
 }

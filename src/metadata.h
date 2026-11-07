@@ -5,6 +5,7 @@
 typedef struct {
     char *title;
     char *introduction;
+    char *author;
     char *date;
     char **tags;
     size_t tag_count;

@@ -153,6 +153,27 @@ class SiteTest(unittest.TestCase):
         self.assertLess(links.index("z.html"), links.index("undated.html"))
         self.check_links()
 
+    def test_embed_metadata_uses_page_title_and_logo(self):
+        self.put("nested/post.md", '---\ntitle: "Post & title"\ntags: [Example]\n---\nPost body')
+        self.build()
+        for path, title in (("index.html", "나의 블로그 &amp; 기록"),
+                            ("posts.html", "Posts"), ("tags.html", "Tags"),
+                            ("tags/Example.html", "Example"),
+                            ("nested/post.html", "Post &amp; title")):
+            text = self.html(path)
+            self.assertIn(f'<meta property="og:title" content="{title}">', text)
+            self.assertIn('<meta property="og:image" content="', text)
+            self.assertIn('public/logo.svg">', text)
+
+    def test_footer_uses_about_author_on_every_page(self):
+        from datetime import datetime
+
+        self.put("about.md", '---\ntitle: Blog\nintroduction: Hello\nauthor: "A & B"\n---\nAbout')
+        self.put("nested/post.md", "---\ntags: [test]\n---\nPost")
+        self.build()
+        for page in self.dest.rglob("*.html"):
+            self.assertIn(f"<hr>\n<footer>© {datetime.now().year} A &amp; B</footer>", page.read_text(), str(page))
+
     def test_empty_blog_has_all_navigation_targets(self):
         self.build()
         self.assertIn("No posts yet.", self.html("index.html"))
