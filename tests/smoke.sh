@@ -18,10 +18,13 @@ grep -q 'older.html' "$tmp/out/posts.html"
 grep -q '<h1>소개 본문</h1>' "$tmp/out/about.html"
 ! grep -q '<li><a href="about.html"' "$tmp/out/posts.html"
 cmp public/logo.svg "$tmp/out/public/logo.svg"
+grep -q '작은 공간입니다.' "$tmp/out/index.html"
 for page in "$tmp/out/index.html" "$tmp/out/about.html" "$tmp/out/posts.html" "$tmp/out/nested/post.html"; do
     grep -q 'align="center"' "$page"
     grep -q '나의 블로그 &amp; 기록' "$page"
-    grep -q '작은 공간입니다.' "$page"
+    if [ "$page" != "$tmp/out/index.html" ]; then
+        ! grep -q '작은 공간입니다.' "$page"
+    fi
     grep -q '>About</a>' "$page"
     grep -q '>Post</a>' "$page"
     grep -q '>Tag</a>' "$page"

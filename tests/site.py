@@ -169,10 +169,13 @@ class SiteTest(unittest.TestCase):
         self.put("nested/post.md", '---\ntitle: "Post & title"\ntags: [Example]\n---\nPost body')
         self.build()
         for path, title in (("index.html", "나의 블로그 &amp; 기록"),
+                            ("about.html", "나의 블로그 &amp; 기록"),
                             ("posts.html", "Posts"), ("tags.html", "Tags"),
                             ("tags/Example.html", "Example"),
                             ("nested/post.html", "Post &amp; title")):
             text = self.html(path)
+            self.assertEqual("작은 공간" in text, path == "index.html")
+            self.assertIn(f'<title>{title}</title>', text)
             self.assertIn(f'<meta property="og:title" content="{title}">', text)
             self.assertIn('<meta property="og:image" content="', text)
             self.assertIn('public/logo.svg">', text)
@@ -295,15 +298,16 @@ class SiteTest(unittest.TestCase):
                 self.build(ok=False)
                 self.assertFalse(self.dest.exists())
 
-    def test_stylesheet_is_shared_and_scoped_to_code_and_math(self):
+    def test_stylesheet_is_shared_with_mobile_rules(self):
         self.put("nested/post.md", "Inline `코드`\n\n```c\nint main(void) {}\n```")
         self.build()
         css = (self.dest / "public/code.css").read_text()
         self.assertEqual(css, (ROOT / "public/code.css").read_text())
         self.assertIn("overflow-x: auto", css)
-        # No page-wide selectors, external imports, webfonts or JS highlighter.
+        # Outside the mobile media query, styles stay scoped to code and math.
+        base_css = css.split("@media", 1)[0]
         selectors = [
-            rule.split("{", 1)[0].strip() for rule in css.split("}") if rule.strip()
+            rule.split("{", 1)[0].strip() for rule in base_css.split("}") if rule.strip()
         ]
         self.assertEqual(
             set(selectors),
@@ -319,7 +323,13 @@ class SiteTest(unittest.TestCase):
             },
         )
         for page in self.dest.rglob("*.html"):
-            parsed = HTML(page.read_text())
+            text = page.read_text()
+            parsed = HTML(text)
+            self.assertIn(
+                ('meta', {'name': 'viewport', 'content': 'width=device-width, initial-scale=1'}),
+                parsed.elements,
+            )
+            self.assertNotIn("<style", text)
             styles = [href for href in parsed.links if href.endswith("code.css")]
             self.assertEqual(len(styles), 1, str(page))
             self.assertEqual(

@@ -191,7 +191,9 @@ static FILE *open_output(const char *root, const char *rel) {
 }
 static FILE *begin_page(const Site *site, const char *root, const char *rel, const char *title) {
     FILE *f = open_output(root, rel);
-    fputs("<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>", f);
+    fputs("<!doctype html>\n<html><head><meta charset=\"utf-8\">"
+          "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+          "<title>", f);
     escaped(f, title);
     fputs("</title><meta property=\"og:site_name\" content=\"", f);
     escaped(f, site->about.meta.title);
@@ -205,8 +207,8 @@ static FILE *begin_page(const Site *site, const char *root, const char *rel, con
     for (const char *s = rel; *s; s++) if (*s == '/') fputs("../", f);
     fputs("public/code.css\"></head><body>\n<header>\n<h1 align=\"center\">", f);
     link(f, rel, "index.html", site->about.meta.title);
-    fputs("</h1>\n<p align=\"center\">", f); escaped(f, site->about.meta.introduction);
-    fputs("</p>\n<nav aria-label=\"Main\"><p align=\"center\">", f);
+    fputs("</h1>\n", f);
+    fputs("<nav aria-label=\"Main\"><p align=\"center\">", f);
     link(f, rel, "about.html", "About"); fputc(' ', f);
     link(f, rel, "posts.html", "Post"); fputc(' ', f);
     link(f, rel, "tags.html", "Tag");
@@ -295,7 +297,9 @@ static void write_site(const Site *site, const char *dest, const char *logo, siz
     f = open_output(dest, "public/code.css");
     if (fwrite(css, 1, css_size, f) != css_size || fclose(f)) die("write code stylesheet");
     f = begin_page(site, dest, "index.html", site->about.meta.title);
-    fputs("<p align=\"center\"><img src=\"public/logo.svg\" alt=\"Blog logo\"></p>\n<h2>Recent post</h2>\n", f);
+    fputs("<p align=\"center\"><img src=\"public/logo.svg\" alt=\"Blog logo\"></p>\n<p align=\"center\">", f);
+    escaped(f, site->about.meta.introduction);
+    fputs("</p>\n<h2>Recent post</h2>\n", f);
     if (site->count) { fputs("<ul>\n", f); post_item(f, "index.html", &site->posts[0]); fputs("</ul>\n", f); }
     else fputs("<p>No posts yet.</p>\n", f);
     end_page(f, site);

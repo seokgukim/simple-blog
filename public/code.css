@@ -22,3 +22,17 @@ math[display="block"] {
     margin: 1em 0;
     overflow-x: auto;
 }
+@media (max-width: 600px) {
+    body {
+        overflow-wrap: anywhere;
+    }
+    img {
+        max-width: 100%;
+        height: auto;
+    }
+    table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+}

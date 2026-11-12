@@ -56,22 +56,23 @@ MD4C, libyaml and itex2MML are compiled into the binary; no separate Markdown, Y
 
 The generated site has these pages:
 
-- **Landing page** (`index.html`): an introduction, the logo, and the post with the newest YAML `date` (a linked title and date, not the entire post body).
+- **Landing page** (`index.html`): the logo, an introduction, and the post with the newest YAML `date` (a linked title and date, not the entire post body). The introduction appears in the main content between the logo and “Recent post”.
 - **About page** (`about.html`): generated from `about.md` at the root of `TARGET_DIR`; this file is reserved for the about page, not treated as a post. Its YAML `title` supplies the blog name and `introduction` supplies the landing-page introduction.
 - **Tag listing** (`tags.html`) and per-tag pages (`tags/<tag-name>.html`).
 - **Post listing** (`posts.html`) and one HTML page per Markdown post.
 
-Every page has a centered header with the blog name, introduction, and navigation links on separate lines:
+Every page has a centered header with the blog name and navigation links:
 
 ```text
        <title>
-   <introduction>
     About Post Tag
 ```
 
+Link-preview metadata (`og:title`) uses the current page's title.
+
 The visual reference is the simple Berkshire Hathaway website.  
 All pages are static HTML with no JavaScript. The only stylesheet, `public/code.css`, adds monospace text, a light background, spacing, horizontal scrolling and syntax colors to code, plus margins/overflow handling for display math.  
-It does not style the surrounding page. Alignment still uses HTML's legacy `align` attribute, not inline styles.
+Each page includes a mobile viewport tag. A media query in `public/code.css` handles screens up to 600px wide: long text wraps, images fit the page, and wide tables scroll horizontally. Alignment still uses HTML's legacy `align` attribute.
 
 ### Content rules
 
