@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "render.h"
 #include "metadata.h"
 
@@ -85,6 +86,32 @@ static void check_empty(const char *path) {
             fail(path, "output must be a new or empty directory");
     }
     if (closedir(d)) die(path);
+}
+/* Remove children relative to open directories, never following symlinks. */
+static void prune_directory(int fd, const char *path) {
+    DIR *d = fdopendir(fd); if (!d) die(path);
+    for (;;) {
+        errno = 0; struct dirent *e = readdir(d);
+        if (!e) { if (errno) die(path); break; }
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char *child = join(path, e->d_name);
+        struct stat st;
+        if (fstatat(fd, e->d_name, &st, AT_SYMLINK_NOFOLLOW)) die(child);
+        int is_dir = S_ISDIR(st.st_mode);
+        if (is_dir) {
+            int child_fd = openat(fd, e->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+            if (child_fd < 0) die(child);
+            prune_directory(child_fd, child);
+        }
+        if (unlinkat(fd, e->d_name, is_dir ? AT_REMOVEDIR : 0)) die(child);
+        free(child);
+    }
+    if (closedir(d)) die(path);
+}
+static void prune_output(const char *path) {
+    int fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (fd < 0) { if (errno == ENOENT) return; die(path); }
+    prune_directory(fd, path);
 }
 static char *read_all(const char *path, size_t *size) {
     int fd = open(path, O_RDONLY | O_NOFOLLOW); if (fd < 0) die(path);
@@ -175,7 +202,7 @@ static void url(FILE *f, const char *s) {
     }
 }
 /* Root-relative site paths are emitted relative to the current HTML page. */
-static void link(FILE *f, const char *current, const char *target, const char *label) {
+static void html_link(FILE *f, const char *current, const char *target, const char *label) {
     fputs("<a href=\"", f);
     for (const char *s = current; *s; s++) if (*s == '/') fputs("../", f);
     url(f, target); fputs("\">", f); escaped(f, label); fputs("</a>", f);
@@ -206,12 +233,12 @@ static FILE *begin_page(const Site *site, const char *root, const char *rel, con
     fputs("public/logo.svg\"><link rel=\"stylesheet\" href=\"", f);
     for (const char *s = rel; *s; s++) if (*s == '/') fputs("../", f);
     fputs("public/code.css\"></head><body>\n<header>\n<h1 align=\"center\">", f);
-    link(f, rel, "index.html", site->about.meta.title);
+    html_link(f, rel, "index.html", site->about.meta.title);
     fputs("</h1>\n", f);
     fputs("<nav aria-label=\"Main\"><p align=\"center\">", f);
-    link(f, rel, "about.html", "About"); fputc(' ', f);
-    link(f, rel, "posts.html", "Post"); fputc(' ', f);
-    link(f, rel, "tags.html", "Tag");
+    html_link(f, rel, "about.html", "About"); fputc(' ', f);
+    html_link(f, rel, "posts.html", "Post"); fputc(' ', f);
+    html_link(f, rel, "tags.html", "Tag");
     fputs("</p></nav>\n</header>\n<hr>\n<main>\n", f);
     return f;
 }
@@ -232,7 +259,7 @@ static void markdown(FILE *f, const Page *p) {
     render_html(f, p->text + p->meta.body_offset, p->size - p->meta.body_offset, p->path);
 }
 static void post_item(FILE *f, const char *current, const Page *p) {
-    fputs("<li>", f); link(f, current, p->html, p->meta.title);
+    fputs("<li>", f); html_link(f, current, p->html, p->meta.title);
     if (p->meta.date) { fputs(" <time>", f); escaped(f, p->meta.date); fputs("</time>", f); }
     fputs("</li>\n", f);
 }
@@ -280,7 +307,7 @@ static void write_tags(const Site *site, const char *dest) {
     fputs("<h2>Tags</h2>\n<ul>\n", index);
     for (size_t i = 0; i < count; i++) {
         char *path = tag_path(tags[i]);
-        fputs("<li>", index); link(index, "tags.html", path, tags[i]); fputs("</li>\n", index);
+        fputs("<li>", index); html_link(index, "tags.html", path, tags[i]); fputs("</li>\n", index);
         FILE *f = begin_page(site, dest, path, tags[i]);
         fputs("<h2>", f); escaped(f, tags[i]); fputs("</h2>\n<ul>\n", f);
         for (size_t j = 0; j < site->count; j++)
@@ -320,7 +347,7 @@ static void write_site(const Site *site, const char *dest, const char *logo, siz
             for (size_t j = 0; j < p->meta.tag_count; j++) {
                 char *path = tag_path(p->meta.tags[j]);
                 if (j) fputs(", ", f);
-                link(f, p->html, path, p->meta.tags[j]); free(path);
+                html_link(f, p->html, path, p->meta.tags[j]); free(path);
             }
             fputs("</p>\n", f);
         }
@@ -330,18 +357,32 @@ static void write_site(const Site *site, const char *dest, const char *logo, siz
 static void free_page(Page *p) {
     free(p->path); free(p->html); free(p->text); metadata_free(&p->meta);
 }
+static int usage(const char *program) {
+    fprintf(stderr, "Usage: %s [-f|--force] [--] TARGET_DIR [OUTPUT_DIR]\n"
+            "Default output: %s/export/\n"
+            "  -f, --force  Prune existing output contents before rebuilding\n",
+            program, BLOG_PROJECT_DIR);
+    return 2;
+}
 int main(int argc, char **argv) {
-    if (argc != 2 && argc != 3) {
-        fprintf(stderr, "Usage: %s TARGET_DIR [OUTPUT_DIR]\nDefault output: %s/export/\n", argv[0], BLOG_PROJECT_DIR);
-        return 2;
+    int force = 0, end_options = 0, count = 0;
+    const char *paths[2];
+    for (int i = 1; i < argc; i++) {
+        if (!end_options && !strcmp(argv[i], "--")) { end_options = 1; continue; }
+        if (!end_options && (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--force"))) {
+            force = 1; continue;
+        }
+        if ((!end_options && argv[i][0] == '-') || count == 2) return usage(argv[0]);
+        paths[count++] = argv[i];
     }
+    if (!count) return usage(argv[0]);
     struct stat st;
-    if (stat(argv[1], &st) || !S_ISDIR(st.st_mode)) fail(argv[1], "invalid source directory");
-    char *source = realpath(argv[1], NULL); if (!source) die(argv[1]);
-    char *destination = destination_path(argc == 3 ? argv[2] : BLOG_PROJECT_DIR "/export");
+    if (stat(paths[0], &st) || !S_ISDIR(st.st_mode)) fail(paths[0], "invalid source directory");
+    char *source = realpath(paths[0], NULL); if (!source) die(paths[0]);
+    char *destination = destination_path(count == 2 ? paths[1] : BLOG_PROJECT_DIR "/export");
     if (contains_path(source, destination) || contains_path(destination, source))
         fail(destination, "source and output directories must not overlap");
-    check_empty(destination);
+    if (!force) check_empty(destination);
     Site site = {0};
     site.about = load_page(source, "about.md", 1);
     discover(&site, source, "");
@@ -357,6 +398,7 @@ int main(int argc, char **argv) {
         }
     size_t logo_size; char *logo = read_all(BLOG_PROJECT_DIR "/public/logo.svg", &logo_size);
     size_t css_size; char *css = read_all(BLOG_PROJECT_DIR "/public/code.css", &css_size);
+    if (force) prune_output(destination);
     write_site(&site, destination, logo, logo_size, css, css_size);
     free(css);
     printf("Built %zu posts in %s\n", site.count, destination);

@@ -123,9 +123,10 @@ make test
 The default output is `<project_dir>/export/`.  
 Make records the project path in the binary, so running it from a different working directory still exports to that path and reads the project's public logo/code stylesheet. Rebuild after moving the project.  
 An optional second argument overrides the output for isolated builds and tests. The output must be new or empty, its parent directory must exist, and it must not overlap the input tree.  
-Existing output is never deleted or overwritten.  
+Pass `-f` or `--force` to delete all existing output contents, including stale files and subdirectories, and rebuild: `./build/simple-blog --force TARGET_DIR [OUTPUT_DIR]`. Without this flag, existing output is never deleted or overwritten. Force also works with the default `export/` destination.
+
 Input symlinks are not followed; `about.md` must be a regular file.  
-Metadata, URL, route and math-expression checks run before output is written; an I/O failure can still leave partial output.
+Metadata, URL, route and math-expression checks run before output is written or pruned. Force still rejects overlapping input/output trees and removes output symlinks without following them. An I/O failure can leave partial output.
 
 Requires a POSIX environment, GCC (tested with 14.2), Make and `patch`. The first build also needs network access, `curl`, `sha256sum`, and `tar` to fetch the pinned MD4C 0.5.2, libyaml 0.2.5 and itex2MML 1.6.1 distributions into ignored `vendor/`.  
 The itex distribution includes generated C: no Flex, Bison, C++, TeX, Node, Poppler or external fonts are needed to build or run the site generator.  

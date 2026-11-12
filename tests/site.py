@@ -48,9 +48,9 @@ class SiteTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(text.encode("utf-8"))
 
-    def build(self, ok=True):
+    def build(self, ok=True, flags=()):
         p = subprocess.run(
-            [str(BIN), str(self.source), str(self.dest)],
+            [str(BIN), *flags, str(self.source), str(self.dest)],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -239,6 +239,82 @@ class SiteTest(unittest.TestCase):
         self.build(ok=False)
         self.assertEqual(sentinel.read_text(), "KEEP")
         self.assertEqual(list(self.dest.iterdir()), [sentinel])
+
+    def test_force_rebuild_prunes_stale_files_without_following_symlinks(self):
+        self.put("nested/post.md", "---\ntitle: Original\n---\nOriginal body")
+        self.build()
+        self.put("nested/post.md", "---\ntitle: Updated\n---\nUpdated body")
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "keep").write_text("KEEP")
+        for flag in ("-f", "--force"):
+            with self.subTest(flag=flag):
+                stale = self.dest / "stale/deep"
+                stale.mkdir(parents=True)
+                (stale / ".old").write_text("stale")
+                (self.dest / ".hidden").write_text("stale")
+                (self.dest / "outside").symlink_to(outside, target_is_directory=True)
+                (self.dest / "source").symlink_to(self.source, target_is_directory=True)
+                (self.dest / "dangling").symlink_to(self.root / "missing")
+                self.build(flags=(flag,))
+                self.assertIn("Updated body", self.html("nested/post.html"))
+                self.assertEqual(
+                    {p.name for p in self.dest.iterdir()},
+                    {"public", "index.html", "about.html", "posts.html", "tags.html", "nested"},
+                )
+                self.assertEqual((outside / "keep").read_text(), "KEEP")
+                self.assertTrue((self.source / "about.md").is_file())
+                self.check_links()
+
+    def test_force_accepts_new_output(self):
+        self.build(flags=("--force",))
+        self.assertTrue((self.dest / "index.html").is_file())
+
+    def test_force_validates_input_before_pruning(self):
+        self.dest.mkdir()
+        sentinel = self.dest / "keep"
+        sentinel.write_text("KEEP")
+        for content in ("---\ntitle: [bad]\n---\nBody", "[bad](javascript:alert(1))"):
+            with self.subTest(content=content):
+                self.put("post.md", content)
+                self.build(ok=False, flags=("--force",))
+                self.assertEqual(sentinel.read_text(), "KEEP")
+                self.assertEqual(list(self.dest.iterdir()), [sentinel])
+
+    def test_force_rejects_overlapping_output_including_symlinks(self):
+        alias = self.root / "alias"
+        alias.symlink_to(self.source, target_is_directory=True)
+        for destination in (self.source, self.source / "generated", self.root, alias / "generated"):
+            with self.subTest(destination=destination):
+                p = subprocess.run(
+                    [str(BIN), "--force", str(self.source), str(destination)],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(p.returncode, 0)
+                self.assertIn("must not overlap", p.stderr)
+                self.assertEqual((self.source / "about.md").read_text(), ABOUT)
+                self.assertFalse((self.source / "generated").exists())
+
+    def test_options_and_end_of_options(self):
+        for flags in (("--unknown",), ("-f",), ("--force",)):
+            p = subprocess.run([str(BIN), *flags], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 2)
+            self.assertIn("Usage:", p.stderr)
+        # A trailing option works, and -- permits paths beginning with a dash.
+        self.build()
+        p = subprocess.run(
+            [str(BIN), str(self.source), str(self.dest), "-f"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        dashed_source = self.root / "-input"
+        self.source.rename(dashed_source)
+        p = subprocess.run(
+            [str(BIN), "--force", "--", "-input", "-output"],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue((self.root / "-output/index.html").is_file())
 
     def test_reserved_route_fails_before_output(self):
         for rel in (

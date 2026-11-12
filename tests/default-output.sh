@@ -19,4 +19,9 @@ if (cd / && "$project/build/simple-blog" "$tmp/input" 2>/dev/null); then
     echo 'Existing export unexpectedly overwritten' >&2
     exit 1
 fi
+# Force rebuilds the default export and removes stale files.
+printf 'stale\n' > "$project/export/stale.html"
+(cd / && "$project/build/simple-blog" --force "$tmp/input")
+test ! -e "$project/export/stale.html"
+test -f "$project/export/index.html"
 echo 'default export test passed'
